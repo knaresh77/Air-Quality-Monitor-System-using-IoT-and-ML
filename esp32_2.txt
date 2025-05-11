@@ -1,0 +1,136 @@
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <WiFi.h>
+
+// Define pins for sensors
+#define DHTPIN 16          // DHT11 sensor pin
+#define MQ2_PIN 32         // MQ-2 sensor analog pin
+#define MQ135_PIN 33       // MQ-135 sensor analog pin
+
+// ThingSpeak settings
+String apiKey = "H1KAQ9287GN827XZ";  // Replace with your ThingSpeak Write API key
+const char* ssid = "water";  // Replace with your Wi-Fi SSID
+const char* pass = "123456789"; // Replace with your Wi-Fi password
+const char* server = "api.thingspeak.com";
+
+WiFiClient client;
+DHT dht(DHTPIN, DHT11); // Initialize DHT11 sensor
+
+LiquidCrystal_I2C lcd(0x27, 16, 2);  // 16x2 LCD with I2C address 0x27
+
+void setup() {
+  Serial.begin(9600);
+  lcd.begin();    // Initialize LCD
+  lcd.backlight();
+ pinMode(MQ2_PIN, INPUT);
+  pinMode(MQ135_PIN, INPUT);
+  // Connect to Wi-Fi
+  Serial.println("Connecting to Wi-Fi...");
+  WiFi.begin(ssid, pass);
+
+  // Wait for connection
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  // Wi-Fi connection successful
+  Serial.println();
+  Serial.println("WiFi connected");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP()); // Print IP address to the serial monitor
+
+  // Initialize DHT sensor
+  dht.begin();
+
+  // Initialize LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Enhancing Waste");
+  lcd.setCursor(0, 1);
+  lcd.print("Segregation");
+  delay(2000);  // Wait for the user to see the initial screen
+}
+
+void loop() {
+  // Read sensor values
+  float temperature = dht.readTemperature();  // Read temperature
+  float humidity = dht.readHumidity();        // Read humidity
+
+  int mq2AnalogValue = digitalRead(MQ2_PIN);     // Analog read for MQ-2 sensor
+  int mq135AnalogValue = digitalRead(MQ135_PIN); // Analog read for MQ-135 sensor
+
+  // Check if DHT11 reading is valid
+  if (isnan(temperature) || isnan(humidity)) {
+    Serial.println("Failed to read from DHT sensor!");
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("DHT Error");
+    delay(2000);
+    return;
+  }
+
+  // Display environmental data (temperature and humidity) on the LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T: ");
+  lcd.print(temperature);
+  lcd.print(" C");
+  lcd.setCursor(0, 1);
+  lcd.print("H: ");
+  lcd.print(humidity);
+  lcd.print(" %");
+  delay(2000);  // Wait 2 seconds for the user to view the data
+
+  // Display analog sensor values (MQ2 and MQ135) on LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("MQ2: ");
+  lcd.print(mq2AnalogValue); // Display the analog value (0-1023)
+  
+  lcd.setCursor(0, 1);
+  lcd.print("MQ135: ");
+  lcd.print(mq135AnalogValue); // Display the analog value (0-1023)
+  delay(2000);  // Wait 2 seconds before updating with new values
+
+  // Display data on Serial Monitor
+  Serial.print("Temperature: ");
+  Serial.print(temperature);
+  Serial.print(" C  ");
+  Serial.print("Humidity: ");
+  Serial.print(humidity);
+  Serial.println(" %");
+  
+  Serial.print("MQ2 Sensor Value: ");
+  Serial.println(mq2AnalogValue); // Display the analog value (0-1023)
+  Serial.print("MQ135 Sensor Value: ");
+  Serial.println(mq135AnalogValue); // Display the analog value (0-1023)
+
+  // Upload data to ThingSpeak
+  if (client.connect(server, 80)) {
+    String postStr = "api_key=" + apiKey;
+    postStr += "&field1=" + String(mq2AnalogValue);      // MQ-2 sensor analog value (0-1023)
+    postStr += "&field2=" + String(mq135AnalogValue);    // MQ-135 sensor analog value (0-1023)
+    postStr += "&field3=" + String(temperature);          // Temperature from DHT11
+    postStr += "&field4=" + String(humidity);             // Humidity from DHT11
+
+    client.print("POST /update HTTP/1.1\n");
+    client.print("Host: api.thingspeak.com\n");
+    client.print("Connection: close\n");
+    client.print("Content-Type: application/x-www-form-urlencoded\n");
+    client.print("Content-Length: ");
+    client.print(postStr.length());
+    client.print("\n\n");
+    client.print(postStr);
+
+    // Print confirmation of data upload to ThingSpeak
+    Serial.println("Data uploaded to ThingSpeak");
+
+    delay(1000);  // Allow time for the server to process the request
+  } else {
+    // If ThingSpeak server is not connected
+    Serial.println("Failed to connect to ThingSpeak");
+  }
+
+  delay(15000);  // Minimum delay between updates for ThingSpeak (15 seconds)
+}
